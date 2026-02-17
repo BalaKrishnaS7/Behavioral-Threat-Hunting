@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log Sentinel</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+
+  :root {
+    --bg:        #080b0f;
+    --bg2:       #0d1117;
+    --bg3:       #111820;
+    --border:    #1e2d3d;
+    --accent:    #00ffe1;
+    --red:       #ff3b3b;
+    --yellow:    #ffc400;
+    --dim:       #3a5068;
+    --text:      #c9d8e8;
+    --text-dim:  #4a6880;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 15px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-mark {
+    width: 32px;
+    height: 32px;
+    border: 2px solid var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--accent);
+    font-size: 14px;
+    position: relative;
+  }
+
+  .logo-mark::before {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border: 1px solid var(--accent);
+    opacity: 0.4;
+  }
+
+  .logo-text {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  .logo-sub {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--accent); }
+    50% { opacity: 0.3; box-shadow: none; }
+  }
+
+  .last-updated {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* Layout */
+  .main {
+    padding: 24px 28px;
+    display: grid;
+    gap: 20px;
+  }
+
+  /* Stat cards row */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+
+  .stat-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+
+  .stat-card.total::before  { background: var(--accent); }
+  .stat-card.critical::before { background: var(--red); }
+  .stat-card.warning::before  { background: var(--yellow); }
+  .stat-card.ips::before     { background: var(--dim); }
+
+  .stat-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  .stat-value {
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -1px;
+  }
+
+  .stat-card.total .stat-value   { color: var(--accent); }
+  .stat-card.critical .stat-value { color: var(--red); }
+  .stat-card.warning .stat-value  { color: var(--yellow); }
+  .stat-card.ips .stat-value      { color: var(--text); }
+
+  /* Middle row */
+  .mid-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  /* Panel */
+  .panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+  }
+
+  .panel-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .panel-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .panel-count {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* Attack type bars */
+  .type-list {
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .type-row {
+    display: grid;
+    grid-template-columns: 180px 1fr 40px;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .type-name {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .type-bar-bg {
+    height: 4px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+  }
+
+  .type-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.6s ease;
+  }
+
+  .type-bar-fill.red    { background: var(--red); }
+  .type-bar-fill.yellow { background: var(--yellow); }
+
+  .type-count {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    text-align: right;
+  }
+
+  /* Top IPs */
+  .ip-list {
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ip-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+  }
+
+  .ip-addr { color: var(--text); }
+
+  .ip-count {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    color: var(--red);
+    font-size: 11px;
+  }
+
+  /* Timeline */
+  .timeline-panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+  }
+
+  .timeline-chart {
+    padding: 18px;
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 100px;
+  }
+
+  .timeline-bar-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    justify-content: flex-end;
+  }
+
+  .timeline-bar {
+    width: 100%;
+    background: var(--accent);
+    opacity: 0.7;
+    min-height: 2px;
+    transition: height 0.5s ease;
+    position: relative;
+  }
+
+  .timeline-bar:hover {
+    opacity: 1;
+  }
+
+  .timeline-bar:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 3px 7px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--accent);
+    white-space: nowrap;
+    z-index: 10;
+  }
+
+  .timeline-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+  }
+
+  /* Alerts feed */
+  .alerts-panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+  }
+
+  .alerts-feed {
+    max-height: 420px;
+    overflow-y: auto;
+  }
+
+  .alerts-feed::-webkit-scrollbar { width: 4px; }
+  .alerts-feed::-webkit-scrollbar-track { background: var(--bg); }
+  .alerts-feed::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .alert-row {
+    border-bottom: 1px solid var(--border);
+    padding: 12px 18px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: start;
+    animation: fadeIn 0.3s ease;
+    cursor: default;
+    transition: background 0.15s;
+  }
+
+  .alert-row:hover { background: var(--bg3); }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .severity-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 3px 8px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+
+  .severity-badge.CRITICAL {
+    color: var(--red);
+    border-color: var(--red);
+    background: rgba(255,59,59,0.08);
+  }
+
+  .severity-badge.WARNING {
+    color: var(--yellow);
+    border-color: var(--yellow);
+    background: rgba(255,196,0,0.08);
+  }
+
+  .alert-body {}
+
+  .alert-type {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .alert-meta {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .alert-meta span { color: var(--text-dim); }
+  .alert-meta .ip  { color: var(--accent); }
+
+  .alert-time {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  /* Empty state */
+  .empty {
+    padding: 40px;
+    text-align: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .mid-row   { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">S</div>
+    <div>
+      <div class="logo-text">Log Sentinel</div>
+      <div class="logo-sub">Network Intrusion Detection</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-indicator">
+      <div class="pulse"></div>
+      MONITORING ACTIVE
+    </div>
+    <div class="last-updated" id="lastUpdated">--</div>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Stat cards -->
+  <div class="stats-row">
+    <div class="stat-card total">
+      <div class="stat-label">Total Alerts</div>
+      <div class="stat-value" id="statTotal">0</div>
+    </div>
+    <div class="stat-card critical">
+      <div class="stat-label">Critical</div>
+      <div class="stat-value" id="statCritical">0</div>
+    </div>
+    <div class="stat-card warning">
+      <div class="stat-label">Warning</div>
+      <div class="stat-value" id="statWarning">0</div>
+    </div>
+    <div class="stat-card ips">
+      <div class="stat-label">Unique IPs</div>
+      <div class="stat-value" id="statIPs">0</div>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline-panel panel">
+    <div class="panel-header">
+      <div class="panel-title">Activity Timeline</div>
+      <div class="panel-count">last 24 hours</div>
+    </div>
+    <div class="timeline-chart" id="timeline">
+      <div class="empty">No timeline data</div>
+    </div>
+  </div>
+
+  <!-- Mid row: attack types + top IPs -->
+  <div class="mid-row">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Attack Types</div>
+        <div class="panel-count" id="typeCount">--</div>
+      </div>
+      <div class="type-list" id="typeList">
+        <div class="empty">No data</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Top Attacking IPs</div>
+        <div class="panel-count" id="ipCount">--</div>
+      </div>
+      <div class="ip-list" id="ipList">
+        <div class="empty">No data</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live alerts feed -->
+  <div class="alerts-panel panel">
+    <div class="panel-header">
+      <div class="panel-title">Live Alert Feed</div>
+      <div class="panel-count" id="alertCount">--</div>
+    </div>
+    <div class="alerts-feed" id="alertsFeed">
+      <div class="empty">Waiting for alerts...</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const API = 'http://localhost:8888';
+
+  async function fetchStats() {
+    const res = await fetch(`${API}/api/stats`);
+    return res.json();
+  }
+
+  async function fetchAlerts() {
+    const res = await fetch(`${API}/api/alerts`);
+    return res.json();
+  }
+
+  function renderStats(stats) {
+    document.getElementById('statTotal').textContent    = stats.total;
+    document.getElementById('statCritical').textContent = stats.critical;
+    document.getElementById('statWarning').textContent  = stats.warning;
+    document.getElementById('statIPs').textContent      = stats.top_ips.length;
+  }
+
+  function renderTimeline(stats) {
+    const el = document.getElementById('timeline');
+    if (!stats.timeline.length) return;
+
+    const max = Math.max(...stats.timeline.map(t => t.count), 1);
+
+    el.innerHTML = stats.timeline.map(t => {
+      const pct = Math.max((t.count / max) * 72, 2);
+      const label = t.hour.slice(11); // HH
+      return `
+        <div class="timeline-bar-wrap">
+          <div class="timeline-bar" style="height:${pct}px" data-tip="${t.hour}: ${t.count} alerts"></div>
+          <div class="timeline-label">${label}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function renderTypes(stats) {
+    const el = document.getElementById('typeList');
+    document.getElementById('typeCount').textContent = `${stats.attack_types.length} types`;
+
+    if (!stats.attack_types.length) {
+      el.innerHTML = '<div class="empty">No data</div>';
+      return;
+    }
+
+    const max = Math.max(...stats.attack_types.map(t => t.count), 1);
+
+    const colorMap = {
+      'SQL Injection':          'red',
+      'Cross-Site Scripting':   'red',
+      'Command Injection':      'red',
+      'Path Traversal':         'red',
+      'Rate Limit Exceeded':    'yellow',
+      'Security Scanner':       'yellow',
+      '404 Spam (Reconnaissance)': 'yellow'
+    };
+
+    el.innerHTML = stats.attack_types.map(t => {
+      const pct = (t.count / max) * 100;
+      const cls = colorMap[t.type] || '';
+      return `
+        <div class="type-row">
+          <div class="type-name">${t.type}</div>
+          <div class="type-bar-bg">
+            <div class="type-bar-fill ${cls}" style="width:${pct}%"></div>
+          </div>
+          <div class="type-count">${t.count}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function renderIPs(stats) {
+    const el = document.getElementById('ipList');
+    document.getElementById('ipCount').textContent = `${stats.top_ips.length} IPs`;
+
+    if (!stats.top_ips.length) {
+      el.innerHTML = '<div class="empty">No data</div>';
+      return;
+    }
+
+    el.innerHTML = stats.top_ips.map(ip => `
+      <div class="ip-row">
+        <span class="ip-addr">${ip.ip}</span>
+        <span class="ip-count">${ip.count} hits</span>
+      </div>`).join('');
+  }
+
+  function renderAlerts(alerts) {
+    const el = document.getElementById('alertsFeed');
+    document.getElementById('alertCount').textContent = `${alerts.length} alerts`;
+
+    if (!alerts.length) {
+      el.innerHTML = '<div class="empty">Waiting for alerts...</div>';
+      return;
+    }
+
+    el.innerHTML = alerts.map(a => {
+      const meta = [];
+      if (a.ip)        meta.push(`<span class="ip">${a.ip}</span>`);
+      if (a.path)      meta.push(`<span>${a.path.slice(0, 60)}${a.path.length > 60 ? '...' : ''}</span>`);
+      if (a.pattern)   meta.push(`<span>pattern: ${a.pattern}</span>`);
+      if (a.useragent) meta.push(`<span>ua: ${a.useragent.slice(0, 40)}</span>`);
+      if (a.requests)  meta.push(`<span>${a.requests} reqs/${a.window}s</span>`);
+      if (a.count)     meta.push(`<span>${a.count} 404s</span>`);
+
+      return `
+        <div class="alert-row">
+          <div class="severity-badge ${a.severity}">${a.severity}</div>
+          <div class="alert-body">
+            <div class="alert-type">${a.type}</div>
+            <div class="alert-meta">${meta.join('')}</div>
+          </div>
+          <div class="alert-time">${a.time ? a.time.slice(11) : '--'}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function updateTimestamp() {
+    const now = new Date();
+    document.getElementById('lastUpdated').textContent =
+      now.toTimeString().slice(0, 8);
+  }
+
+  async function refresh() {
+    try {
+      const [stats, alerts] = await Promise.all([fetchStats(), fetchAlerts()]);
+      renderStats(stats);
+      renderTimeline(stats);
+      renderTypes(stats);
+      renderIPs(stats);
+      renderAlerts(alerts);
+      updateTimestamp();
+    } catch (e) {
+      document.getElementById('lastUpdated').textContent = 'server offline';
+    }
+  }
+
+  // Initial load + poll every 5 seconds
+  refresh();
+  setInterval(refresh, 5000);
+</script>
+</body>
+</html>
