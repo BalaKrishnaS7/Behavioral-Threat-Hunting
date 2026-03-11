@@ -70,6 +70,7 @@ class LogSentinel:
         self.whitelist_ips = {
             ip.strip() for ip in str(self.config.get('whitelist_ips', '')).split(',') if ip.strip()
         }
+        self._alert_log_handle = None  # persistent file handle for alert logging
         
         # Primary Nginx combined log regex pattern
         self.log_pattern_combined = re.compile(
@@ -242,16 +243,9 @@ class LogSentinel:
         """Check if text matches any pattern in the list"""
         raw_text = text or ''
         decoded_text = unquote(unquote(raw_text))  # Double decode for encoded attacks
-        lowered_text = raw_text.lower()
-        lowered_decoded = decoded_text.lower()
-        
+
         for pattern in pattern_list:
-            if (
-                pattern.search(raw_text)
-                or pattern.search(decoded_text)
-                or pattern.search(lowered_text)
-                or pattern.search(lowered_decoded)
-            ):
+            if pattern.search(raw_text) or pattern.search(decoded_text):
                 return pattern.pattern
         return None
 
@@ -315,7 +309,14 @@ class LogSentinel:
         return reasons
 
     def should_emit_alert(self, alert):
-        """Suppress duplicate alerts within a time window"""
+        """Suppress duplicate alerts and enforce min_alert_level"""
+        # Enforce minimum alert level
+        severity_rank = {'INFO': 0, 'WARNING': 1, 'CRITICAL': 2}
+        min_level = self.config.get('min_alert_level', 1)
+        alert_rank = severity_rank.get(alert.get('severity', 'WARNING'), 1)
+        if alert_rank < min_level:
+            return False
+
         if not self.config.get('dedup_enabled', True):
             return True
 
@@ -332,6 +333,13 @@ class LogSentinel:
 
         last_seen = self.recent_alerts.get(fingerprint)
         self.recent_alerts[fingerprint] = current_time
+
+        # Prune stale entries to prevent unbounded memory growth
+        if len(self.recent_alerts) > 10000:
+            cutoff = current_time - window
+            self.recent_alerts = {
+                k: v for k, v in self.recent_alerts.items() if v > cutoff
+            }
 
         if last_seen and current_time - last_seen < window:
             self.suppressed_duplicates += 1
@@ -581,51 +589,85 @@ class LogSentinel:
         return output
     
     def log_alert(self, alert):
-        """Write alert to log file"""
+        """Write alert to log file using a persistent handle, rotation-safe."""
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         alert_path = self.config['alert_log']
         alert_dir = os.path.dirname(alert_path)
         if alert_dir:
             os.makedirs(alert_dir, exist_ok=True)
-        
-        with open(alert_path, 'a') as f:
-            f.write(f"\n{'='*80}\n")
-            f.write(f"[{timestamp}] {alert['type']} - {alert['severity']}\n")
-            f.write(f"IP: {alert['ip']}\n")
-            
-            if 'pattern' in alert:
-                f.write(f"Pattern: {alert['pattern']}\n")
-            if 'path' in alert:
-                f.write(f"Path: {alert['path']}\n")
-            if 'useragent' in alert:
-                f.write(f"User-Agent: {alert['useragent']}\n")
-            if 'score' in alert:
-                f.write(f"Risk Score: {alert['score']}/100\n")
-            if 'reasons' in alert:
-                f.write(f"Reasons: {' | '.join(alert['reasons'])}\n")
-            if 'requests' in alert:
-                f.write(f"Requests: {alert['requests']} in {alert['window']}s\n")
-            if 'count' in alert:
-                f.write(f"404 Count: {alert['count']} in last 60s\n")
+
+        # Detect log rotation: if the file on disk has a different inode than our
+        # open handle (or has been deleted), close and reopen so writes go to the
+        # new file rather than the old rotated-away one.
+        if self._alert_log_handle is not None and not self._alert_log_handle.closed:
+            try:
+                handle_inode = os.fstat(self._alert_log_handle.fileno()).st_ino
+                disk_inode = os.stat(alert_path).st_ino
+                if handle_inode != disk_inode:
+                    self._alert_log_handle.close()
+                    self._alert_log_handle = None
+            except OSError:
+                self._alert_log_handle.close()
+                self._alert_log_handle = None
+
+        # Open persistent handle on first use or after rotation
+        if self._alert_log_handle is None or self._alert_log_handle.closed:
+            self._alert_log_handle = open(alert_path, 'a')
+
+        f = self._alert_log_handle
+        f.write(f"\n{'='*80}\n")
+        f.write(f"[{timestamp}] {alert['type']} - {alert['severity']}\n")
+        f.write(f"IP: {alert['ip']}\n")
+
+        if 'pattern' in alert:
+            f.write(f"Pattern: {alert['pattern']}\n")
+        if 'path' in alert:
+            f.write(f"Path: {alert['path']}\n")
+        if 'useragent' in alert:
+            f.write(f"User-Agent: {alert['useragent']}\n")
+        if 'score' in alert:
+            f.write(f"Risk Score: {alert['score']}/100\n")
+        if 'reasons' in alert:
+            f.write(f"Reasons: {' | '.join(alert['reasons'])}\n")
+        if 'requests' in alert:
+            f.write(f"Requests: {alert['requests']} in {alert['window']}s\n")
+        if 'count' in alert:
+            f.write(f"404 Count: {alert['count']} in last 60s\n")
+
+        f.flush()  # ensure data is written to disk immediately
     
     def tail_file(self, filename):
-        """Tail a file like 'tail -f' - waits forever for new lines"""
+        """Tail a file like 'tail -f', handles log rotation by detecting inode/size changes."""
         file_dir = os.path.dirname(filename)
         if file_dir:
             os.makedirs(file_dir, exist_ok=True)
 
-        # Create the file if it doesn't exist
         if not os.path.exists(filename):
             open(filename, 'w').close()
 
-        with open(filename, 'r') as f:
-            f.seek(0, os.SEEK_END)  # go to end of file
-            while True:             # loop forever
+        f = open(filename, 'r')
+        f.seek(0, os.SEEK_END)
+        current_inode = os.fstat(f.fileno()).st_ino
+
+        try:
+            while True:
                 line = f.readline()
                 if not line:
-                    time.sleep(0.1) # nothing new, wait and try again
+                    time.sleep(0.1)
+                    # Check for log rotation: file replaced or truncated
+                    try:
+                        new_stat = os.stat(filename)
+                    except FileNotFoundError:
+                        time.sleep(0.5)
+                        continue
+                    if new_stat.st_ino != current_inode or new_stat.st_size < f.tell():
+                        f.close()
+                        f = open(filename, 'r')
+                        current_inode = os.fstat(f.fileno()).st_ino
                     continue
                 yield line.strip()
+        finally:
+            f.close()
     
     def run(self):
         """Main monitoring loop"""
@@ -660,6 +702,8 @@ class LogSentinel:
             print(f"\n\n{Colors.GREEN}Log Sentinel stopped.{Colors.RESET}")
             print(f"{Colors.CYAN}Total alerts: {self.alert_count}{Colors.RESET}")
             print(f"{Colors.CYAN}Suppressed duplicates: {self.suppressed_duplicates}{Colors.RESET}")
+            if self._alert_log_handle and not self._alert_log_handle.closed:
+                self._alert_log_handle.close()
             sys.exit(0)
 
 

@@ -17,15 +17,30 @@ HOST = 'localhost'
 PORT = 8888
 INCIDENT_WINDOW_MINUTES = 10
 
+# --- Simple file-level cache for parsed alerts ---
+_alerts_cache = []
+_alerts_cache_key = (0.0, 0)  # (mtime, file_size) — two-factor key avoids stale cache on coarse-resolution filesystems (e.g. Windows FAT/NTFS)
+
 
 def parse_alerts():
-    """Parse alerts.log into structured data"""
-    alerts = []
+    """Parse alerts.log into structured data, with (mtime, size)-based caching."""
+    global _alerts_cache, _alerts_cache_key
 
     alert_file = ALERTS_LOG if os.path.exists(ALERTS_LOG) else 'alerts.log'
 
     if not os.path.exists(alert_file):
-        return alerts
+        return []
+
+    try:
+        stat = os.stat(alert_file)
+        cache_key = (stat.st_mtime, stat.st_size)
+    except OSError:
+        return []
+
+    if cache_key == _alerts_cache_key and _alerts_cache:
+        return list(_alerts_cache)  # return a copy so callers can mutate safely
+
+    alerts = []
 
     with open(alert_file, 'r') as f:
         content = f.read()
@@ -92,7 +107,9 @@ def parse_alerts():
 
         alerts.append(alert)
 
-    return alerts
+    _alerts_cache = alerts
+    _alerts_cache_key = cache_key
+    return list(alerts)
 
 
 def parse_alert_time(alert):
@@ -253,13 +270,18 @@ def build_stats(alerts):
 class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
-        if self.path == '/':
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        path = parsed.path
+        self._query = parse_qs(parsed.query)
+
+        if path == '/':
             self.serve_dashboard()
-        elif self.path == '/api/alerts':
+        elif path == '/api/alerts':
             self.serve_alerts()
-        elif self.path == '/api/stats':
+        elif path == '/api/stats':
             self.serve_stats()
-        elif self.path == '/api/incidents':
+        elif path == '/api/incidents':
             self.serve_incidents()
         else:
             self.send_response(404)
@@ -267,42 +289,61 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def serve_dashboard(self):
         dashboard_path = os.path.join(os.path.dirname(__file__), 'dashboard.html')
-        with open(dashboard_path, 'rb') as f:
-            content = f.read()
+        try:
+            with open(dashboard_path, 'rb') as f:
+                content = f.read()
+        except FileNotFoundError:
+            self.send_response(404)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'dashboard.html not found. Make sure it is in the same directory as Dashboard-server.py.')
+            return
         self.send_response(200)
         self.send_header('Content-Type', 'text/html')
+        self.send_header('Content-Length', str(len(content)))
         self.end_headers()
         self.wfile.write(content)
+
+    def _send_json(self, payload: str):
+        """Helper: send a JSON response with correct headers."""
+        encoded = payload.encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Content-Length', str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
 
     def serve_alerts(self):
         alerts = parse_alerts()
         alerts.reverse()  # newest first
-        data = json.dumps(alerts[-100:])  # last 100
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(data.encode())
+
+        # Optional query param filters: ?severity=CRITICAL&ip=1.2.3.4&limit=50
+        q = getattr(self, '_query', {})
+        severity_filter = q.get('severity', [None])[0]
+        ip_filter = q.get('ip', [None])[0]
+        try:
+            limit = int(q.get('limit', [100])[0])
+            limit = max(1, min(limit, 1000))
+        except (ValueError, TypeError):
+            limit = 100
+
+        if severity_filter:
+            alerts = [a for a in alerts if a.get('severity', '').upper() == severity_filter.upper()]
+        if ip_filter:
+            alerts = [a for a in alerts if a.get('ip', '') == ip_filter]
+
+        self._send_json(json.dumps(alerts[:limit]))
 
     def serve_stats(self):
         alerts = parse_alerts()
         stats = build_stats(alerts)
-        data = json.dumps(stats)
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(data.encode())
+        self._send_json(json.dumps(stats))
 
     def serve_incidents(self):
         alerts = parse_alerts()
         incidents = build_incidents(alerts)
-        data = json.dumps(incidents[:100])
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(data.encode())
+        self._send_json(json.dumps(incidents[:100]))
 
     def log_message(self, format, *args):
         pass  # suppress request logs
