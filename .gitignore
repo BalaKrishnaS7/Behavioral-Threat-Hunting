@@ -34,3 +34,6 @@ log-sentinel/evaluation/report.json
 # Local outputs
 logs/
 output/
+
+# Local release artifacts
+*.zip

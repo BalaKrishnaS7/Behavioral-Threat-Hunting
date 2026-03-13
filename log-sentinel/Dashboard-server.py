@@ -7,9 +7,10 @@ Serves the dashboard and provides API endpoints to read alerts.log
 import json
 import os
 import re
+import threading
 from datetime import datetime
 from collections import defaultdict
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 
 ALERTS_LOG = 'data/alerts.log'
@@ -20,10 +21,13 @@ INCIDENT_WINDOW_MINUTES = 10
 # --- Simple file-level cache for parsed alerts ---
 _alerts_cache = []
 _alerts_cache_key = (0.0, 0)  # (mtime, file_size) — two-factor key avoids stale cache on coarse-resolution filesystems (e.g. Windows FAT/NTFS)
+_cache_lock = threading.Lock()  # guards _alerts_cache + _alerts_cache_key under ThreadingHTTPServer
 
 
 def parse_alerts():
-    """Parse alerts.log into structured data, with (mtime, size)-based caching."""
+    """Parse alerts.log into structured data, with (mtime, size)-based caching.
+    Thread-safe: uses _cache_lock to prevent concurrent threads from redundantly
+    re-parsing the file or clobbering each other's writes."""
     global _alerts_cache, _alerts_cache_key
 
     alert_file = ALERTS_LOG if os.path.exists(ALERTS_LOG) else 'alerts.log'
@@ -37,79 +41,83 @@ def parse_alerts():
     except OSError:
         return []
 
-    if cache_key == _alerts_cache_key and _alerts_cache:
-        return list(_alerts_cache)  # return a copy so callers can mutate safely
+    with _cache_lock:
+        if cache_key == _alerts_cache_key and _alerts_cache:
+            return list(_alerts_cache)  # return a copy so callers can mutate safely
 
-    alerts = []
+        alerts = []
 
-    with open(alert_file, 'r') as f:
-        content = f.read()
+        try:
+            with open(alert_file, 'r') as f:
+                content = f.read()
+        except OSError:
+            return list(_alerts_cache)  # return stale cache on read error rather than empty
 
-    # Split on separator lines
-    blocks = content.split('=' * 80)
+        # Split on separator lines
+        blocks = content.split('=' * 80)
 
-    for block in blocks:
-        block = block.strip()
-        if not block:
-            continue
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
 
-        alert = {}
+            alert = {}
 
-        # Timestamp and type
-        match = re.search(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] (.+?) - (CRITICAL|WARNING)', block)
-        if match:
-            alert['time'] = match.group(1)
-            alert['type'] = match.group(2)
-            alert['severity'] = match.group(3)
-        else:
-            continue
+            # Timestamp and type
+            match = re.search(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] (.+?) - (CRITICAL|WARNING)', block)
+            if match:
+                alert['time'] = match.group(1)
+                alert['type'] = match.group(2)
+                alert['severity'] = match.group(3)
+            else:
+                continue
 
-        # IP
-        ip_match = re.search(r'IP: (.+)', block)
-        if ip_match:
-            alert['ip'] = ip_match.group(1).strip()
+            # IP
+            ip_match = re.search(r'IP: (.+)', block)
+            if ip_match:
+                alert['ip'] = ip_match.group(1).strip()
 
-        # Pattern
-        pattern_match = re.search(r'Pattern: (.+)', block)
-        if pattern_match:
-            alert['pattern'] = pattern_match.group(1).strip()
+            # Pattern
+            pattern_match = re.search(r'Pattern: (.+)', block)
+            if pattern_match:
+                alert['pattern'] = pattern_match.group(1).strip()
 
-        # Path
-        path_match = re.search(r'Path: (.+)', block)
-        if path_match:
-            alert['path'] = path_match.group(1).strip()
+            # Path
+            path_match = re.search(r'Path: (.+)', block)
+            if path_match:
+                alert['path'] = path_match.group(1).strip()
 
-        # User-Agent
-        ua_match = re.search(r'User-Agent: (.+)', block)
-        if ua_match:
-            alert['useragent'] = ua_match.group(1).strip()
+            # User-Agent
+            ua_match = re.search(r'User-Agent: (.+)', block)
+            if ua_match:
+                alert['useragent'] = ua_match.group(1).strip()
 
-        # Requests (rate limit)
-        req_match = re.search(r'Requests: (\d+) in (\d+)s', block)
-        if req_match:
-            alert['requests'] = req_match.group(1)
-            alert['window'] = req_match.group(2)
+            # Requests (rate limit)
+            req_match = re.search(r'Requests: (\d+) in (\d+)s', block)
+            if req_match:
+                alert['requests'] = req_match.group(1)
+                alert['window'] = req_match.group(2)
 
-        # Risk score
-        score_match = re.search(r'Risk Score: (\d+)/100', block)
-        if score_match:
-            alert['score'] = int(score_match.group(1))
+            # Risk score
+            score_match = re.search(r'Risk Score: (\d+)/100', block)
+            if score_match:
+                alert['score'] = int(score_match.group(1))
 
-        # Explainable reasons
-        reasons_match = re.search(r'Reasons: (.+)', block)
-        if reasons_match:
-            alert['reasons'] = [part.strip() for part in reasons_match.group(1).split('|') if part.strip()]
+            # Explainable reasons
+            reasons_match = re.search(r'Reasons: (.+)', block)
+            if reasons_match:
+                alert['reasons'] = [part.strip() for part in reasons_match.group(1).split('|') if part.strip()]
 
-        # 404 count
-        count_match = re.search(r'404 Count: (\d+)', block)
-        if count_match:
-            alert['count'] = count_match.group(1)
+            # 404 count
+            count_match = re.search(r'404 Count: (\d+)', block)
+            if count_match:
+                alert['count'] = count_match.group(1)
 
-        alerts.append(alert)
+            alerts.append(alert)
 
-    _alerts_cache = alerts
-    _alerts_cache_key = cache_key
-    return list(alerts)
+        _alerts_cache = alerts
+        _alerts_cache_key = cache_key
+        return list(alerts)
 
 
 def parse_alert_time(alert):
@@ -207,8 +215,9 @@ def build_incidents(alerts, window_minutes=INCIDENT_WINDOW_MINUTES):
     return formatted
 
 
-def build_stats(alerts):
-    """Build summary statistics from alerts"""
+def build_stats(alerts, incidents=None):
+    """Build summary statistics from alerts.
+    Pass pre-built incidents to avoid calling build_incidents twice per /api/stats request."""
     if not alerts:
         return {
             'total': 0,
@@ -252,7 +261,9 @@ def build_stats(alerts):
                 pass
     timeline = sorted(hour_counts.items())[-24:]  # last 24 hours
 
-    incidents = build_incidents(alerts)
+    # Use pre-built incidents if provided, otherwise build once
+    if incidents is None:
+        incidents = build_incidents(alerts)
 
     return {
         'total': len(alerts),
@@ -271,21 +282,31 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(self.path)
-        path = parsed.path
-        self._query = parse_qs(parsed.query)
+        try:
+            parsed = urlparse(self.path)
+            path = parsed.path
+            self._query = parse_qs(parsed.query)
 
-        if path == '/':
-            self.serve_dashboard()
-        elif path == '/api/alerts':
-            self.serve_alerts()
-        elif path == '/api/stats':
-            self.serve_stats()
-        elif path == '/api/incidents':
-            self.serve_incidents()
-        else:
-            self.send_response(404)
+            if path == '/':
+                self.serve_dashboard()
+            elif path == '/api/alerts':
+                self.serve_alerts()
+            elif path == '/api/stats':
+                self.serve_stats()
+            elif path == '/api/incidents':
+                self.serve_incidents()
+            else:
+                self.send_response(404)
+                self.end_headers()
+        except Exception:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
+            try:
+                self.wfile.write(b'{"error":"internal server error"}')
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     def serve_dashboard(self):
         dashboard_path = os.path.join(os.path.dirname(__file__), 'dashboard.html')
@@ -295,14 +316,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self.send_response(404)
             self.send_header('Content-Type', 'text/plain')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(b'dashboard.html not found. Make sure it is in the same directory as Dashboard-server.py.')
+            try:
+                self.wfile.write(b'dashboard.html not found. Make sure it is in the same directory as Dashboard-server.py.')
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             return
         self.send_response(200)
         self.send_header('Content-Type', 'text/html')
         self.send_header('Content-Length', str(len(content)))
+        self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        self.wfile.write(content)
+        try:
+            self.wfile.write(content)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _send_json(self, payload: str):
         """Helper: send a JSON response with correct headers."""
@@ -312,7 +341,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Content-Length', str(len(encoded)))
         self.end_headers()
-        self.wfile.write(encoded)
+        try:
+            self.wfile.write(encoded)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def serve_alerts(self):
         alerts = parse_alerts()
@@ -337,7 +369,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def serve_stats(self):
         alerts = parse_alerts()
-        stats = build_stats(alerts)
+        incidents = build_incidents(alerts)          # build once
+        stats = build_stats(alerts, incidents=incidents)  # reuse, don't rebuild
         self._send_json(json.dumps(stats))
 
     def serve_incidents(self):
@@ -350,7 +383,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    server = HTTPServer((HOST, PORT), DashboardHandler)
+    server = ThreadingHTTPServer((HOST, PORT), DashboardHandler)
     print(f"Log Sentinel Dashboard running at http://{HOST}:{PORT}")
     print("Press Ctrl+C to stop.")
     try:

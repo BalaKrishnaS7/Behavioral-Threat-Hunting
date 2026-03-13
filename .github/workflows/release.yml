@@ -1,0 +1,111 @@
+name: Build and Release
+
+# Triggers only when you push a version tag like v1.0.0
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the full repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. Read the version from the tag (e.g. v1.0.0)
+      - name: Get version tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid tag format: $VERSION"
+            echo "Expected: vX.Y.Z"
+            exit 1
+          fi
+
+      # 3. Build the 3 zip packages
+      - name: Build release zips
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+
+          zip -r "sentinel-core-only-${VERSION}.zip"     log-sentinel/
+          zip -r "sentinel-canvas-only-${VERSION}.zip"   sentinel-canvas/
+          zip -r "sentinel-full-bundle-${VERSION}.zip"   log-sentinel/ sentinel-canvas/
+
+          echo "Built packages:"
+          ls -lh *.zip
+
+      # 4. Create the GitHub Release and attach the zips
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: "${{ steps.version.outputs.VERSION }} — Behavioral Threat Hunting"
+          body: |
+            ## Behavioral Threat Hunting ${{ steps.version.outputs.VERSION }}
+
+            Real-time web attack detection with an optional drag-and-drop dashboard builder.
+
+            ---
+
+            ## Download
+
+            | Package | Contents | Who it's for |
+            |---|---|---|
+            | `sentinel-core-only-${{ steps.version.outputs.VERSION }}.zip` | Log Sentinel only | Just want the detector |
+            | `sentinel-canvas-only-${{ steps.version.outputs.VERSION }}.zip` | Sentinel Canvas only | Already have the core |
+            | `sentinel-full-bundle-${{ steps.version.outputs.VERSION }}.zip` | Both tools | Fresh install |
+
+            ---
+
+            ## Quick Start
+
+            **Core only:**
+            ```bash
+            cd log-sentinel/
+            pip install -r requirements.txt
+            python sentinel.py
+            python Dashboard-server.py
+            ```
+
+            **With Canvas:**
+            ```bash
+            # Terminal 1 — start the detection engine + API
+            cd log-sentinel/
+            python Dashboard-server.py
+
+            # Terminal 2 — start the dashboard builder
+            cd sentinel-canvas/
+            python canvas-server.py
+            # Open http://localhost:8889
+            ```
+
+            ---
+
+            ## Requirements
+            - Python 3.8+
+            - No extra packages needed for Sentinel Canvas
+          files: |
+            sentinel-core-only-${{ steps.version.outputs.VERSION }}.zip
+            sentinel-canvas-only-${{ steps.version.outputs.VERSION }}.zip
+            sentinel-full-bundle-${{ steps.version.outputs.VERSION }}.zip
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
