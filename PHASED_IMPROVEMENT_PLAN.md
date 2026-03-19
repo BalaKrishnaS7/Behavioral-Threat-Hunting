@@ -34,6 +34,12 @@ This plan is structured to make the project academically strong, implementation-
 - Measure precision, recall, F1, detection latency, and resource usage
 - Compare against baseline tools and discuss trade-offs
 
+## Phase 6 — Packaging and Operations
+- Add Docker packaging for reproducible environment setup
+- Provide one-command launcher scripts for Windows and Linux/macOS
+- Isolate component startup using compose profiles for resilient demos
+- Document quick-start and troubleshooting commands for viva/demo readiness
+
 ## Current Status
 - Implemented in code: **Phase 0 + Phase 1 core engine improvements**.
 - Implemented in code: **Phase 2 baseline behavioral anomaly detection + explainable reason codes**.

@@ -37,3 +37,12 @@ output/
 
 # Local release artifacts
 *.zip
+
+# Portal UI (Node/Next.js local artifacts)
+apps/portal-ui/node_modules/
+apps/portal-ui/.next/
+apps/portal-ui/.turbo/
+apps/portal-ui/npm-debug.log*
+apps/portal-ui/yarn-debug.log*
+apps/portal-ui/yarn-error.log*
+apps/portal-ui/pnpm-debug.log*

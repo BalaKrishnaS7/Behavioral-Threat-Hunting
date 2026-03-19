@@ -63,6 +63,9 @@ flowchart LR
   - `/api/alerts` recent enriched alerts
   - `/api/stats` aggregate counts, score metrics, anomaly totals
   - `/api/incidents` correlated incident groups by IP and time window
+  - `/api/prometheus/metrics` discover Prometheus metric names for custom charting
+  - `/api/prometheus/query-range` query time-series by metric + dimension + range + step
+  - `/api/grafana/embed-preview` build safe Grafana embed URLs for dashboard/panel previews
 
 ### Dashboard UI
 - File: `log-sentinel/dashboard.html`

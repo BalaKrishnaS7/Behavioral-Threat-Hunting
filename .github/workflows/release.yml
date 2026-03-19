@@ -38,14 +38,13 @@ jobs:
             exit 1
           fi
 
-      # 3. Build the 3 zip packages
+      # 3. Build release packages
       - name: Build release zips
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
 
           zip -r "sentinel-core-only-${VERSION}.zip"     log-sentinel/
-          zip -r "sentinel-canvas-only-${VERSION}.zip"   sentinel-canvas/
-          zip -r "sentinel-full-bundle-${VERSION}.zip"   log-sentinel/ sentinel-canvas/
+          zip -r "sentinel-full-bundle-${VERSION}.zip"   log-sentinel/ apps/ infra/ docker-compose.yml run-stack.ps1 run-stack.bat run-stack.sh README.md
 
           echo "Built packages:"
           ls -lh *.zip
@@ -59,7 +58,7 @@ jobs:
           body: |
             ## Behavioral Threat Hunting ${{ steps.version.outputs.VERSION }}
 
-            Real-time web attack detection with an optional drag-and-drop dashboard builder.
+            Real-time web attack detection with integrated Portal UI/API customization workflow.
 
             ---
 
@@ -68,8 +67,7 @@ jobs:
             | Package | Contents | Who it's for |
             |---|---|---|
             | `sentinel-core-only-${{ steps.version.outputs.VERSION }}.zip` | Log Sentinel only | Just want the detector |
-            | `sentinel-canvas-only-${{ steps.version.outputs.VERSION }}.zip` | Sentinel Canvas only | Already have the core |
-            | `sentinel-full-bundle-${{ steps.version.outputs.VERSION }}.zip` | Both tools | Fresh install |
+            | `sentinel-full-bundle-${{ steps.version.outputs.VERSION }}.zip` | Core + Portal + Observability configs | Fresh install |
 
             ---
 
@@ -83,26 +81,19 @@ jobs:
             python Dashboard-server.py
             ```
 
-            **With Canvas:**
+            **Full integrated stack:**
             ```bash
-            # Terminal 1 — start the detection engine + API
-            cd log-sentinel/
-            python Dashboard-server.py
-
-            # Terminal 2 — start the dashboard builder
-            cd sentinel-canvas/
-            python canvas-server.py
-            # Open http://localhost:8889
+            docker compose --profile full up --build
+            # Open Portal UI: http://localhost:3001
             ```
 
             ---
 
             ## Requirements
             - Python 3.8+
-            - No extra packages needed for Sentinel Canvas
+            - Docker Desktop (recommended for full stack)
           files: |
             sentinel-core-only-${{ steps.version.outputs.VERSION }}.zip
-            sentinel-canvas-only-${{ steps.version.outputs.VERSION }}.zip
             sentinel-full-bundle-${{ steps.version.outputs.VERSION }}.zip
           fail_on_unmatched_files: true
           draft: false

@@ -6,8 +6,10 @@ Demonstrate end-to-end detection, explainability, incident correlation, and dash
 ## Pre-Demo Setup (before presentation)
 1. Open terminal at repository root.
 2. Ensure Docker Desktop is running.
-3. Start stack:
-   - `docker compose up --build`
+3. Start stack (choose one):
+  - `docker compose --profile full up --build`
+  - Windows PowerShell: `./run-stack.ps1 -Profile full -Action up`
+  - Linux/macOS: `./run-stack.sh full up`
 4. Open dashboard:
    - `http://localhost:8888`
 
@@ -56,6 +58,8 @@ Say:
 ## Backup Commands
 - Stop stack:
   - `docker compose down`
+  - Windows PowerShell: `./run-stack.ps1 -Profile full -Action down`
+  - Linux/macOS: `./run-stack.sh full down`
 - Re-run metrics locally:
   - `python log-sentinel/evaluation/generate_dataset.py`
   - `python log-sentinel/evaluation/evaluate.py`

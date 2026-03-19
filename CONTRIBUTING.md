@@ -6,14 +6,25 @@ Thanks for your interest in improving Behavioral Threat Hunting.
 1. Create and activate a Python virtual environment.
 2. Install dependencies:
    - `pip install -r log-sentinel/requirements.txt`
-3. Run locally:
+   - `pip install -r apps/portal-api/requirements.txt`
+3. (Optional for Portal UI local dev) install Node dependencies:
+   - `cd apps/portal-ui && npm install`
+   - `cd ../..`
+4. Run locally (Python):
    - `python log-sentinel/sentinel.py`
    - `python log-sentinel/Dashboard-server.py`
+
+Optional (Docker one-command):
+- Windows PowerShell: `./run-stack.ps1 -Profile full -Action up`
+- Windows CMD: `run-stack.bat full up`
+- Linux/macOS: `./run-stack.sh full up`
 
 ## Contribution Scope
 - Detection rules in `log-sentinel/rules/`
 - Detection engine in `log-sentinel/sentinel.py`
 - Dashboard API and UI in `log-sentinel/Dashboard-server.py` and `log-sentinel/dashboard.html`
+- Portal API in `apps/portal-api/`
+- Portal UI in `apps/portal-ui/`
 - Documentation in `README.md` and `PHASED_IMPROVEMENT_PLAN.md`
 
 ## Rule Contribution Requirements

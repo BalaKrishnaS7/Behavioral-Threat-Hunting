@@ -26,8 +26,8 @@ Log Sentinel is a lightweight, real-time log monitor for Nginx-style access logs
 ## Release Highlights (Mar 2026)
 - Improved dashboard reliability under concurrent requests by moving to a threaded HTTP server.
 - Added thread-safe alert parsing cache in dashboard API to avoid race conditions and stale reads.
-- Improved Sentinel Canvas API client with in-flight request deduplication, timeout handling, and transient retry logic.
-- Added automated GitHub Release workflow triggered by version tags (`vX.Y.Z`) to publish downloadable zip bundles.
+- Integrated teammate-style Portal stack (FastAPI + Next.js + Postgres) for customizable dashboard workflows.
+- Added automated GitHub Release workflow triggered by version tags (`vX.Y.Z`) to publish core and full downloadable bundles.
 - Added Windows release helper script (`build-release.bat`) with safeguards (version validation, dirty-tree warning, duplicate tag checks).
 
 ## Project Structure
@@ -44,26 +44,39 @@ Log Sentinel is a lightweight, real-time log monitor for Nginx-style access logs
   - evaluation/: Benchmark dataset and metrics scripts
   - data/: Runtime log files (git-ignored)
   - test.sh: Log attack simulator (bash)
-- sentinel-canvas/
-  - canvas-server.py: Lightweight static server for Canvas UI
-  - index.html: Canvas main page
-  - css/: Styling modules
-  - js/: Canvas builder, widget, and API client modules
+- apps/
+  - portal-api/: FastAPI service for dashboard registry, layout persistence, and summary APIs
+  - portal-ui/: Next.js analyst UI with embedded dashboard workspace
+- infra/
+  - grafana/, prometheus/, loki/, promtail/: observability stack configs (compose optional profiles)
 - build-release.bat: Windows helper to create and push release tags safely
 - PHASED_IMPROVEMENT_PLAN.md: Final-year implementation roadmap
 
 ## Requirements
-- Python 3.8+
-- Dependencies listed in `log-sentinel/requirements.txt`
+- Python 3.8+ (core engine and dashboard)
+- Node.js 20+ and npm (Portal UI local development)
+- Docker Desktop (recommended for full integrated stack)
+- Python dependency files:
+  - `log-sentinel/requirements.txt` (currently `PyYAML>=6.0,<7.0`)
+  - `apps/portal-api/requirements.txt`
 
 ## Setup
 1) Create a virtual environment (optional) and install dependencies:
 
 ```bash
 pip install -r log-sentinel/requirements.txt
+pip install -r apps/portal-api/requirements.txt
 ```
 
-2) Update the log path and settings in log-sentinel/config.yaml if needed.
+2) (Optional, for local Portal UI development) install UI dependencies:
+
+```bash
+cd apps/portal-ui
+npm install
+cd ../..
+```
+
+3) Update the log path and settings in log-sentinel/config.yaml if needed.
 
 ## Run the Sentinel
 From the log-sentinel directory:
@@ -83,33 +96,22 @@ python Dashboard-server.py
 
 Then open http://localhost:8888 in a browser.
 
-## Run Sentinel Canvas (Optional)
-In another terminal, from sentinel-canvas:
+## Run Portal UI/API (Recommended)
+From repository root (Docker):
 
 ```bash
-python canvas-server.py
+docker compose --profile portal up --build
 ```
 
-Then open http://localhost:8889 in a browser.
-Canvas can consume the dashboard API from `http://localhost:8888`.
+Then open:
+- Portal UI: `http://localhost:3001`
+- Portal API: `http://localhost:8080`
+
+Portal API is already integrated with Log Sentinel dashboard APIs.
 
 ## Download the Right Release Bundle
-Each tagged release publishes 3 zip packages. Choose based on your use case:
-
-- `sentinel-core-only-vX.Y.Z.zip`
-  - Includes only `log-sentinel/`
-  - Use this if you only need the detection engine + classic dashboard API/UI
-- `sentinel-canvas-only-vX.Y.Z.zip`
-  - Includes only `sentinel-canvas/`
-  - Use this if you already run the core backend and only want the drag-and-drop Canvas frontend
-- `sentinel-full-bundle-vX.Y.Z.zip`
-  - Includes both `log-sentinel/` and `sentinel-canvas/`
-  - Best choice for first-time setup and demos
-
-Practical recommendation:
-- New users: download full bundle
-- Security lab / backend-only deployment: download core-only
-- UI-only upgrade for existing core install: download canvas-only
+Current release automation in this repository focuses on the Log Sentinel core bundle.
+For the new Portal-based customization workflow, use source checkout from this repository and run with Docker Compose profiles (`portal`, `observability`, or `full`).
 
 ## Create a New Release (Maintainers)
 From repository root on a clean branch:
@@ -122,24 +124,103 @@ What this does:
 - Normalizes the version to `v1.2.3`
 - Warns if there are uncommitted changes
 - Prevents duplicate local or remote tags
-- Pushes the tag so GitHub Actions builds and publishes the 3 zip bundles
+- Pushes the tag so GitHub Actions builds and publishes release bundles
 
 ## One-Command Docker Demo
+Quick Start Matrix:
+
+| OS / Shell | Start Full Stack | Logs | Stop |
+|---|---|---|---|
+| Windows PowerShell | `./run-stack.ps1 -Profile full -Action up` | `./run-stack.ps1 -Profile full -Action logs` | `./run-stack.ps1 -Profile full -Action down` |
+| Windows CMD | `run-stack.bat full up` | `run-stack.bat full logs` | `run-stack.bat full down` |
+| Linux/macOS | `./run-stack.sh full up` | `./run-stack.sh full logs` | `./run-stack.sh full down` |
+
 From the repository root:
 
 ```bash
-docker compose up --build
+docker compose --profile full up --build
 ```
+
+Or use one command launcher scripts:
+
+PowerShell:
+
+```powershell
+./run-stack.ps1 -Profile full -Action up
+```
+
+CMD:
+
+```bat
+run-stack.bat full up
+```
+
+Linux/macOS:
+
+```bash
+chmod +x ./run-stack.sh
+./run-stack.sh full up
+```
+
+Run components separately (isolated profiles):
+
+```powershell
+./run-stack.ps1 -Profile core -Action up       # sentinel + dashboard
+./run-stack.ps1 -Profile engine -Action up     # sentinel only
+./run-stack.ps1 -Profile dashboard -Action up  # dashboard only
+./run-stack.ps1 -Profile simulator -Action up  # simulator only
+./run-stack.ps1 -Profile portal -Action up     # postgres + redis + portal-api + portal-ui
+./run-stack.ps1 -Profile observability -Action up  # prometheus + grafana
+```
+
+Linux/macOS profile examples:
+
+```bash
+./run-stack.sh core up
+./run-stack.sh engine up
+./run-stack.sh dashboard up
+./run-stack.sh simulator up
+./run-stack.sh portal up
+./run-stack.sh observability up
+```
+
+Show launcher help:
+
+```powershell
+./run-stack.ps1 -Help
+```
+
+```bat
+run-stack.bat help
+```
+
+```bash
+./run-stack.sh --help
+```
+
+This allows one component group to fail without stopping other independently-run groups.
 
 This starts:
 - `sentinel` (detection engine)
 - `dashboard` (UI/API on `http://localhost:8888`)
 - `simulator` (scripted attack traffic generator for demo)
+- `postgres`, `redis`, `portal-api`, `portal-ui` (customizable dashboard workflow)
+- `prometheus`, `grafana` (observability profile)
 
 Stop with:
 
 ```bash
 docker compose down
+```
+
+or with launchers:
+
+```powershell
+./run-stack.ps1 -Profile full -Action down
+```
+
+```bash
+./run-stack.sh full down
 ```
 
 ## Simulate Attacks
@@ -180,7 +261,7 @@ Alerts are written to `log-sentinel/data/alerts.log` and optionally printed to t
 - GET /api/stats (summary stats)
 - GET /api/incidents (correlated incidents by IP and time window)
 
-Sentinel Canvas reads these same API endpoints and renders them as configurable widgets.
+Portal API consumes these endpoints and normalizes them for Portal UI summaries and dashboard workflows.
 
 ## Notes
 - The Nginx log regex expects the default combined log format.
