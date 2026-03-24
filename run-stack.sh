@@ -10,7 +10,7 @@ Usage:
   ./run-stack.sh [profile] [action]
 
 Profiles:
-  full | core | engine | dashboard | simulator | portal | observability
+  full | core | engine | dashboard | simulator | demo | portal | observability | homarr
 
 Actions:
   up | down | restart | logs | ps
@@ -23,10 +23,10 @@ EOF
 fi
 
 case "$PROFILE" in
-  full|core|engine|dashboard|simulator|portal|observability) ;;
+  full|core|engine|dashboard|simulator|demo|portal|observability|homarr) ;;
   *)
     echo "Invalid profile: $PROFILE"
-    echo "Allowed: full, core, engine, dashboard, simulator, portal, observability"
+    echo "Allowed: full, core, engine, dashboard, simulator, demo, portal, observability, homarr"
     exit 1
     ;;
 esac

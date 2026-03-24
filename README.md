@@ -180,6 +180,7 @@ Run components separately (isolated profiles):
 ./run-stack.ps1 -Profile demo -Action up       # demo-webapp + log-generator
 ./run-stack.ps1 -Profile portal -Action up     # postgres + redis + portal-api + portal-ui
 ./run-stack.ps1 -Profile observability -Action up  # prometheus + grafana
+./run-stack.ps1 -Profile homarr -Action up     # Homarr launcher dashboard
 ```
 
 Linux/macOS profile examples:
@@ -192,6 +193,7 @@ Linux/macOS profile examples:
 ./run-stack.sh demo up
 ./run-stack.sh portal up
 ./run-stack.sh observability up
+./run-stack.sh homarr up
 ```
 
 Show launcher help:
@@ -218,6 +220,7 @@ This starts:
 - `simulator` (scripted attack traffic generator for demo)
 - `postgres`, `redis`, `portal-api`, `portal-ui` (customizable dashboard workflow)
 - `prometheus`, `grafana` (observability profile)
+- `homarr` (service launcher and quick navigation at `http://localhost:7575`)
 
 Stop with:
 

@@ -154,6 +154,20 @@ services:
       - prometheus
     restart: unless-stopped
 
+  homarr:
+    profiles: ["homarr", "full"]
+    image: ghcr.io/homarr-labs/homarr:latest
+    container_name: homarr
+    ports:
+      - "7575:7575"
+    environment:
+      TZ: Asia/Kolkata
+      SECRET_ENCRYPTION_KEY: c1626f4ebb174158ce79839cfe59fdc8bbcacc66d6b74471da28fa20bfe8f47a
+    volumes:
+      - homarr_appdata:/appdata
+    restart: unless-stopped
+
 volumes:
   nginx_logs:
   portal_postgres_data:
+  homarr_appdata:

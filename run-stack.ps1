@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('full', 'core', 'engine', 'dashboard', 'simulator', 'portal', 'observability')]
+  [ValidateSet('full', 'core', 'engine', 'dashboard', 'simulator', 'demo', 'portal', 'observability', 'homarr')]
   [string]$Profile = 'full',
 
   [ValidateSet('up', 'down', 'restart', 'logs', 'ps')]
@@ -10,7 +10,7 @@ param(
 
 if ($Help) {
   Write-Host 'Usage:'
-  Write-Host '  ./run-stack.ps1 [-Profile <full|core|engine|dashboard|simulator|portal|observability>] [-Action <up|down|restart|logs|ps>]'
+  Write-Host '  ./run-stack.ps1 [-Profile <full|core|engine|dashboard|simulator|demo|portal|observability|homarr>] [-Action <up|down|restart|logs|ps>]'
   Write-Host ''
   Write-Host 'Examples:'
   Write-Host '  ./run-stack.ps1 -Profile full -Action up'
